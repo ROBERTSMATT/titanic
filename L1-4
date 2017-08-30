@@ -1,0 +1,214 @@
+#training taken from kaggle http://trevorstephens.com/kaggle-titanic-tutorial/
+#set working directory
+setwd("//ts003/roberm$/My Documents/R/Kaggle/Kaggle training")
+
+#Load in package: utils = read in dataset
+library(utils)
+library(dplyr)
+library(rpart)
+library(rpart.plot)
+
+######## LESSON 1 #######
+
+
+#importing the two dataframes
+#if we want strings to be characters not factors then needs, stringsAsFactors=FALSE
+test <- read.csv("//TS003/roberm$/My Documents/R/Kaggle/test.csv")
+train <- read.csv("//TS003/roberm$/My Documents/R/Kaggle/train.csv")
+
+
+#looking at the structure of the dataframe
+str(test)
+str(train)
+
+#summary statistics, counts and proportions
+train$Survived
+table(train$Survived)
+prop.table(table(train$Survived))
+
+#this is correct for training dataset - build model on data you know is correct then test to new dataset using your previous predicitons
+prop.table(table(train$Survived))
+
+#create new variable, repeat for all records, all records survived currently. 
+test$Survived <- rep(0,418)
+
+#create file as a dataframe and then output this datafile into a csv excluding row numbers 
+submit <- data.frame(passengerId = test$PassengerId, Survived = test$Survived)
+write.csv(submit, file = "theyallperish.csv", row.names = FALSE)
+
+
+
+####### LESSON 2 ########
+#Using other variables as a target predictor variable for survived
+
+
+
+#Look at the sex and ages profile of the data - below does the same to the data
+#create a cross tab between sex and survived - this creates all percentage sum of all passengers
+#However we want row percentages!!!! a 2 would give column percentages
+#from this we can see that the majoirty of female survived we can use this in our real data to predict
+
+table(train$Sex)
+summary(train$Sex)
+prop.table(table(train$Sex, train$Survived))
+prop.table(table(train$Sex, train$Survived),1)
+
+#So where all passengers on the sex variable equal female, set the survived variable as 1, all females have survived.
+#subset dataframe on sex variable where sex equals female and set new variable as 1
+test$Survived <- 0
+test$Survived[test$Sex=='female'] <- 1 
+
+#create a variable that says they are a child, assume all people adults then subset dataframe on under 18's and name as a child
+summary(train$Age) 
+train$Child <- 0  
+train$Child[train$Age < 18] <- 1 
+
+#specify target variable ~ and then the variables to subset it over, then specify the dataset it is from, and then the function to apply
+aggregate(Survived ~ Child + Sex, data = train, FUN = length)
+#create the proportions - as more useful; same as above but create our own function that sums all people and finds the percentage of each gender and age group that survived.
+#adult women most likely to survive, then female children, then male children then adult men.
+#predictions cant change as even male children more likely to die than females. more accurate to say all females survive.
+aggregate(Survived ~ Child + Sex, data = train, FUN=function(x) {sum(x)/length(x)})
+
+
+#what about what class they were sitting in and what fare they paid.
+#class is categorical, fare is continuous
+#create categories of fare
+#new variable crate this variable by subsetting dataset where fare satisfies the two conditions and assign value. 
+
+train$fare2 <- '30+'
+train$fare2 [train$Fare < 30 & train$Fare >= 20] <- "20-30"
+train$fare2 [train$Fare < 20 & train$Fare >= 10] <- "10-20"
+train$fare2 [train$Fare < 10] <- "< 10"
+
+#aggregated percentages for people who have survived by fare, sex and class 
+#a large number of women who paid more than £20 miss out on a life boat.
+aggregate(Survived ~ fare2 + Sex, data = train, FUN = function(x) {sum(x)/length(x)})
+aggregate(Survived ~ fare2 + Sex + Pclass, data = train, FUN = sum)
+aggregate(Survived ~ fare2 + Sex + Pclass, data = train, FUN = function(x) {sum(x)/length(x)})
+
+
+#test code of the mean above, this mean only works for proportions here because the variable is binary a 1 or 0. so for
+#there was 6 females in class 1, who between 20-30: and 5 of them survived, so the % that survived is 5/6 = .83
+#demonstrated in the code below.
+train$Survtest[train$Sex =='female'& train$Pclass == '1'& train$fare2 == '20-30' ] <- 1
+table(train$Survtest)
+
+
+#edit the prediction
+test$Survived <- 0
+test$Survived[test$Sex=='female'] <- 1 
+test$Survived[test$Sex=='female' & test$Fare >= 20 & test$Pclass == 3] <- 0
+submit <- data.frame(passengerId = test$PassengerId, Survived = test$Survived)
+write.csv(submit, file = "genderclassmodel.csv", row.names = FALSE)
+
+
+
+####### LESSON 3 ########
+####### DECISION TREES ########
+
+
+
+
+#Build a decision tree using correct survived/not survived and then apply to actual dataset.
+library(rpart)
+fit <- rpart (Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked,
+              data = train,
+              method="class")
+plot(fit)
+text(fit)
+
+rpart.plot(fit, extra = 4)
+
+Prediction <- predict(fit, test, type = "class")
+submit <- data.frame (PassengerId = test$PassengerId, Survived = Prediction)
+write.csv (submit, file = "myfirsttree.csv", row.names = FALSE)
+
+#change parameters on the rpart fit
+#minsplit = how many passengers must sit in a bucket before even looking for a split.
+#cp = complexity parametersplits that aren’t deemed important enough attempted. 
+?rpart.control
+fit <- rpart(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked,
+             data=train,
+             method = "class",
+             control=rpart.control(minsplit=2,cp=0))
+rpart.plot (fit)
+
+#This is worse why? overfitting!!!
+#Data is 100% accurate on training data but could be very wrong when fit perfectly to actual data
+#noise NE signal
+Prediction <- predict(fit, test, type = "class")
+submit <- data.frame (PassengerID = test$PassengerId, Survived = Prediction)
+write.csv (submit, file = "mysecondDT.csv", row.names=FALSE)
+
+
+
+####### LESSON 4 ########
+####### FEATURE ENGINEERING/DERIVING VARIABLES ########
+
+
+
+
+#determine success or failure of a predictive model
+#human element of machine learning
+#chopping and combining attributes to engineer a feature
+
+train$Name [1]
+
+test$Survived <- NA
+#merge datasets 
+#to merge rows need to be the same
+?dplyr::select
+train <- select(train, -Survtest, -Child, -fare2)
+combi <- rbind(train, test)
+combi$Name [1]
+#names are factors so need to change
+combi$Name <- as.character(combi$Name)
+combi$Name [1]
+
+#TITLES
+#split the strings 
+#inside the squere brackets is regular expressions
+strsplit(combi$Name, split='[,.]')[[1]][2]
+combi$Title <- sapply(combi$Name, FUN=function(x) {strsplit(x, split='[,.]')[[1]][2]})
+combi$Title <- sub(' ', '', combi$Title)
+table(combi$Title)
+#combine the titles that the model cant use as too few people
+#store any title with mme or mlle in a vector and then replace with mlle
+combi$Title [combi$Title %in% c('Mme', 'Mlle')] <- 'Mlle'
+table(combi$Title)
+combi$Title[combi$Title %in% c('Capt', 'Don', 'Major', 'Sir')] <- 'Sir'
+combi$Title[combi$Title %in% c('Dona', 'Lady', 'the Countess', 'Jonkheer')] <- 'Lady'
+table(combi$Title)
+#now change back to factors as they are cateogire we have created 
+combi$Title <- factor (combi$Title)
+
+#create a FAMILY SIZE variable 
+#add siblings spouses parents and children +1 for their self
+combi$FamilySize <- combi$SibSp + combi$Parch +1
+#combine surname with family name to ensure you actually get famileis together, and not to include people with the same surname
+combi$Surname <- sapply(combi$Name, FUN=function(x) {strsplit(x, split='[,.]')[[1]][1]})
+#append family size to this surname 
+#paste brings two strings together
+combi$FamilyID <- paste (as.character(combi$FamiySize), combi$Surname, sep="")
+#only want to label large families for this analysis
+combi$FamilyID [combi$FamilySize <= 2] <- 'Small'
+table(combi$FamilyID)
+famIDs <- data.frame(table(combi$FamilyID))
+#not all families have a unique identifier there are multiple large famileis with the same name
+famIDs<-famIDs[famIDs$Freq<=2,]
+combi$FamilyID[combi$FamilyID %in% famIDs$Var1] <- 'Small'
+combi$FamilyID <- factor(combi$FamilyID)
+#split the dataset apart
+train <-combi[1:891,]
+test <- combi[892:1309,]
+
+fit <- rpart (Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked + Title + FamilySize + FamilyID,
+              data = train,
+              method="class")
+rpart.plot(fit)
+
+test <- select(test, -Survived)
+Prediction <- predict(fit, test, type = "class")
+submit <- data.frame (PassengerID = test$PassengerId, Survived = Prediction)
+write.csv (submit, file = "featureengin.csv", row.names=FALSE)
